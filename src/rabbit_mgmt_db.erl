@@ -189,16 +189,17 @@
 -define(GC_MIN_ROWS, 100).
 -define(GC_MIN_RATIO, 0.01).
 
--define(DROP_LENGTH, 15000).
+-define(DROP_LENGTH, 5000).
+-define(DROP_CHANNEL_STATS_LENGTH, 25000).
+-define(DROP_BOMB_LENGTH, 500000).
 
-prioritise_cast({event, #event{type  = Type}}, Len, _State)
-  when (Type =:= channel_stats orelse
-		Type =:= connection_stats orelse	
-        Type =:= queue_stats orelse
-		Type =:= node_stats orelse
-		Type =:= node_node_stats) andalso Len > ?DROP_LENGTH -> drop;
-prioritise_cast(_Msg, _Len, _State) ->
-    0.
+prioritise_cast({event, _Event}, Len, _State) when Len > ?DROP_BOMB_LENGTH -> exit(message_queue_to_big);
+prioritise_cast({event, #event{type  = channel_stats}}, Len, _State) Len > ?DROP_CHANNEL_STATS_LENGTH -> drop;
+prioritise_cast({event, #event{type  = connection_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = queue_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = node_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = node_node_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
+prioritise_cast(_Msg, _Len, _State) -> 0.
 
 %% We want timely replies to queries even when overloaded, so return 5
 %% as priority. Also we only have access to the queue length here, not
