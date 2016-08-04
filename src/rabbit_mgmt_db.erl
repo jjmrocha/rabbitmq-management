@@ -37,9 +37,6 @@
 %% For testing
 -export([override_lookups/1, reset_lookups/0]).
 
-%% For Async queue
-%-export([event_handling/2]).
-
 -import(rabbit_misc, [pget/3, pset/3]).
 
 %% The management database listens to events broadcast via the
@@ -146,7 +143,6 @@
           interval,
           event_refresh_ref,
           rates_mode
-		  %, async_queue
   }).
 
 -define(FINE_STATS_TYPES, [channel_queue_stats, channel_exchange_stats,
@@ -197,8 +193,8 @@
 
 prioritise_cast({event, #event{type  = Type}}, Len, _State)
   when (Type =:= channel_stats orelse
+		Type =:= connection_stats orelse	
         Type =:= queue_stats orelse
-		Type =:= connection_stats orelse
 		Type =:= node_stats orelse
 		Type =:= node_node_stats) andalso Len > ?DROP_LENGTH -> drop;
 prioritise_cast(_Msg, _Len, _State) ->
@@ -275,8 +271,7 @@ init([Ref]) ->
     {ok, RatesMode} = application:get_env(rabbitmq_management, rates_mode),
     rabbit_node_monitor:subscribe(self()),
     rabbit_log:info("Statistics database started.~n"),
-	%{ok, AsyncPid} = async_queue:start_link(),
-    Table = fun () -> ets:new(rabbit_mgmt_db, [ordered_set, {write_concurrency, true}, public]) end,
+    Table = fun () -> ets:new(rabbit_mgmt_db, [ordered_set]) end,
     Tables = orddict:from_list([{Key, Table()} || Key <- ?TABLES]),
     {ok, set_gc_timer(
            reset_lookups(
@@ -287,7 +282,6 @@ init([Ref]) ->
                     aggregated_stats_index = Table(),
                     event_refresh_ref      = Ref,
                     rates_mode             = RatesMode
-					%, async_queue            = AsyncPid
 				   })), hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
@@ -503,10 +497,6 @@ details_key(Key) -> list_to_atom(atom_to_list(Key) ++ "_details").
 %%----------------------------------------------------------------------------
 %% Internal, event-receiving side
 %%----------------------------------------------------------------------------
-
-%handle_event(Event, State=#state{async_queue=Pid}) ->
-%	async_queue:run(Pid, fun() -> ?MODULE:event_handling(Event, State) end),
-%    {ok, State}.
 
 handle_event(#event{type = queue_stats, props = Stats, timestamp = Timestamp},
              State) ->
