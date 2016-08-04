@@ -194,11 +194,11 @@
 -define(DROP_BOMB_LENGTH, 500000).
 
 prioritise_cast({event, _Event}, Len, _State) when Len > ?DROP_BOMB_LENGTH -> exit(message_queue_to_big);
-prioritise_cast({event, #event{type  = channel_stats}}, Len, _State) Len > ?DROP_CHANNEL_STATS_LENGTH -> drop;
-prioritise_cast({event, #event{type  = connection_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
-prioritise_cast({event, #event{type  = queue_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
-prioritise_cast({event, #event{type  = node_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
-prioritise_cast({event, #event{type  = node_node_stats}}, Len, _State) Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = channel_stats}}, Len, _State) when Len > ?DROP_CHANNEL_STATS_LENGTH -> drop;
+prioritise_cast({event, #event{type  = connection_stats}}, Len, _State) when Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = queue_stats}}, Len, _State) when Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = node_stats}}, Len, _State) when Len > ?DROP_LENGTH -> drop;
+prioritise_cast({event, #event{type  = node_node_stats}}, Len, _State) when Len > ?DROP_LENGTH -> drop;
 prioritise_cast(_Msg, _Len, _State) -> 0.
 
 %% We want timely replies to queries even when overloaded, so return 5
