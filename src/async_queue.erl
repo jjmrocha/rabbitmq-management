@@ -24,18 +24,18 @@ run(_Pid, _Fun) -> {error, invalid_function}.
 %% Internal functions
 %% ====================================================================
 
--record(state, {queue, count, max, timer}).
+-record(state, {queue, count, cores, level, max, timer}).
 
 init(Parent) ->
-  Max = get_default_max_processes(),
-  init(Parent, Max).
+  CoreNumber = erlang:system_info(schedulers),
+  init(Parent, CoreNumber).
 
-init(Parent, Max) ->
+init(Parent, CoreNumber) ->
   Debug = sys:debug_options([]),
   proc_lib:init_ack({ok, self()}),
   process_flag(priority, high),
   {ok, Timer} = timer:send_interval(60000, check_queue_size),
-  State = #state{queue = queue:new(), count = 0, max = Max, timer= Timer},
+  State = #state{queue = queue:new(), count = 0, cores = CoreNumber, level = 1, max = CoreNumber, timer= Timer},
   loop(Parent, Debug, State).
 
 loop(Parent, Debug, State) ->
@@ -53,8 +53,8 @@ handle_msg(?job(Fun), Parent, Debug, State) ->
   NewState = process(Fun, State),
   loop(Parent, Debug, NewState);
 handle_msg(check_queue_size, Parent, Debug, State) ->
-  check_queue_size(State),
-  loop(Parent, Debug, State);
+  NewState = check_queue_size(State),
+  loop(Parent, Debug, NewState);
 handle_msg(_Msg, Parent, Debug, State) ->
   loop(Parent, Debug, State).
 
@@ -79,14 +79,16 @@ process(Fun, State = #state{count = Count}) ->
   {_, _Ref} = erlang:spawn_opt(Fun, [monitor, {priority, high}]),
   State#state{count = Count + 1}.
 
-check_queue_size(#state{queue = Queue}) ->
+check_queue_size(State = #state{queue = Queue, level = Level}) ->
   Size = queue:len(Queue),
-  if Size > 250000 -> exit(queue_to_big);
-	 true -> ok
+  if Size > 200000, Level =:= 10 -> exit(queue_to_big);
+	 Size > 10000, Level < 10 -> compute(State, Level + 1);
+	 Size < 1000, Level > 1 -> compute(State, Level - 1);
+	 true -> State
   end.
 
-get_default_max_processes() ->
-  erlang:system_info(schedulers).
+compute(State = #state{cores = CoreNumber}, Level) ->
+  State#state{level = Level, max = CoreNumber * Level}.
 
 send_job(Pid, Fun) ->
   Pid ! ?job(Fun),
