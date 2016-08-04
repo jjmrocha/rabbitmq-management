@@ -9,7 +9,7 @@
 -export([start_link/0]).
 -export([run/2]).
 
--export([init/1, init/2]).
+-export([init/1]).
 -export([system_continue/3, system_terminate/4, system_code_change/4]).
 
 start_link() ->
@@ -24,18 +24,17 @@ run(_Pid, _Fun) -> {error, invalid_function}.
 %% Internal functions
 %% ====================================================================
 
--record(state, {queue, count, cores, level, max, timer}).
+-record(state, {queue, count, max, timer}).
 
 init(Parent) ->
-  CoreNumber = erlang:system_info(schedulers),
-  init(Parent, CoreNumber).
-
-init(Parent, CoreNumber) ->
   Debug = sys:debug_options([]),
   proc_lib:init_ack({ok, self()}),
   process_flag(priority, high),
   {ok, Timer} = timer:send_interval(60000, check_queue_size),
-  State = #state{queue = queue:new(), count = 0, cores = CoreNumber, level = 1, max = CoreNumber, timer= Timer},
+  State = #state{queue = queue:new(), 
+				 count = 0, 
+				 max = 1, 
+				 timer= Timer},
   loop(Parent, Debug, State).
 
 loop(Parent, Debug, State) ->
@@ -79,16 +78,11 @@ process(Fun, State = #state{count = Count}) ->
   {_, _Ref} = erlang:spawn_opt(Fun, [monitor, {priority, high}]),
   State#state{count = Count + 1}.
 
-check_queue_size(State = #state{queue = Queue, level = Level}) ->
+check_queue_size(State = #state{queue = Queue}) ->
   Size = queue:len(Queue),
-  if Size > 200000, Level =:= 10 -> exit(queue_to_big);
-	 Size > 10000, Level < 10 -> compute(State, Level + 1);
-	 Size < 1000, Level > 1 -> compute(State, Level - 1);
+  if Size > 250000 -> exit(queue_to_big);
 	 true -> State
   end.
-
-compute(State = #state{cores = CoreNumber}, Level) ->
-  State#state{level = Level, max = CoreNumber * Level}.
 
 send_job(Pid, Fun) ->
   Pid ! ?job(Fun),

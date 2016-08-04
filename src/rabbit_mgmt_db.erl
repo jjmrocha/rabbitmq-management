@@ -38,7 +38,7 @@
 -export([override_lookups/1, reset_lookups/0]).
 
 %% For Async queue
--export([event_handling/2]).
+%-export([event_handling/2]).
 
 -import(rabbit_misc, [pget/3, pset/3]).
 
@@ -145,8 +145,9 @@
           lookups,
           interval,
           event_refresh_ref,
-          rates_mode,
-		  async_queue}).
+          rates_mode
+		  %, async_queue
+  }).
 
 -define(FINE_STATS_TYPES, [channel_queue_stats, channel_exchange_stats,
                            channel_queue_exchange_stats]).
@@ -192,16 +193,15 @@
 -define(GC_MIN_ROWS, 100).
 -define(GC_MIN_RATIO, 0.01).
 
--define(DROP_LENGTH, 1000).
+-define(DROP_LENGTH, 15000).
 
 prioritise_cast({event, #event{type  = Type,
                                props = Props}}, Len, _State)
   when (Type =:= channel_stats orelse
-        Type =:= queue_stats) andalso Len > ?DROP_LENGTH ->
-    case pget(idle_since, Props) of
-        unknown -> drop;
-        _       -> 0
-    end;
+        Type =:= queue_stats orelse
+		Type =:= connection_stats orelse
+		Type =:= node_stats orelse
+		Type =:= node_node_stats) andalso Len > ?DROP_LENGTH -> drop;
 prioritise_cast(_Msg, _Len, _State) ->
     0.
 
@@ -276,7 +276,7 @@ init([Ref]) ->
     {ok, RatesMode} = application:get_env(rabbitmq_management, rates_mode),
     rabbit_node_monitor:subscribe(self()),
     rabbit_log:info("Statistics database started.~n"),
-	{ok, AsyncPid} = async_queue:start_link(),
+	%{ok, AsyncPid} = async_queue:start_link(),
     Table = fun () -> ets:new(rabbit_mgmt_db, [ordered_set, {write_concurrency, true}, public]) end,
     Tables = orddict:from_list([{Key, Table()} || Key <- ?TABLES]),
     {ok, set_gc_timer(
@@ -287,8 +287,9 @@ init([Ref]) ->
                     aggregated_stats       = Table(),
                     aggregated_stats_index = Table(),
                     event_refresh_ref      = Ref,
-                    rates_mode             = RatesMode,
-					async_queue            = AsyncPid})), hibernate,
+                    rates_mode             = RatesMode
+					%, async_queue            = AsyncPid
+				   })), hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
 handle_call({augment_exchanges, Xs, Ranges, basic}, _From, State) ->
@@ -504,11 +505,11 @@ details_key(Key) -> list_to_atom(atom_to_list(Key) ++ "_details").
 %% Internal, event-receiving side
 %%----------------------------------------------------------------------------
 
-handle_event(Event, State=#state{async_queue=Pid}) ->
-	async_queue:run(Pid, fun() -> ?MODULE:event_handling(Event, State) end),
-    {ok, State}.
+%handle_event(Event, State=#state{async_queue=Pid}) ->
+%	async_queue:run(Pid, fun() -> ?MODULE:event_handling(Event, State) end),
+%    {ok, State}.
 
-event_handling(#event{type = queue_stats, props = Stats, timestamp = Timestamp},
+handle_event(#event{type = queue_stats, props = Stats, timestamp = Timestamp},
              State) ->
     handle_stats(queue_stats, Stats, Timestamp,
                  [{fun rabbit_mgmt_format:properties/1,[backing_queue_status]},
@@ -516,7 +517,7 @@ event_handling(#event{type = queue_stats, props = Stats, timestamp = Timestamp},
                   {fun rabbit_mgmt_format:queue_state/1, [state]}],
                  ?QUEUE_MSG_COUNTS, ?QUEUE_MSG_RATES, State);
 
-event_handling(Event = #event{type = queue_deleted,
+handle_event(Event = #event{type = queue_deleted,
                             props = [{name, Name}],
                             timestamp = Timestamp},
              State = #state{old_stats = OldTable}) ->
@@ -536,18 +537,18 @@ event_handling(Event = #event{type = queue_deleted,
     delete_samples(queue_stats,          Name,        State),
     handle_deleted(queue_stats, Event, State);
 
-event_handling(Event = #event{type = exchange_deleted,
+handle_event(Event = #event{type = exchange_deleted,
                             props = [{name, Name}]}, State) ->
     delete_samples(channel_exchange_stats,  {'_', Name}, State),
     delete_samples(queue_exchange_stats,    {'_', Name}, State),
     delete_samples(exchange_stats,          Name,        State),
     handle_deleted(exchange_stats, Event, State);
 
-event_handling(#event{type = vhost_deleted,
+handle_event(#event{type = vhost_deleted,
                     props = [{name, Name}]}, State) ->
     delete_samples(vhost_stats, Name, State);
 
-event_handling(#event{type = connection_created, props = Stats}, State) ->
+handle_event(#event{type = connection_created, props = Stats}, State) ->
     handle_created(
       connection_stats, Stats,
       [{fun rabbit_mgmt_format:addr/1,         [host, peer_host]},
@@ -555,21 +556,21 @@ event_handling(#event{type = connection_created, props = Stats}, State) ->
        {fun rabbit_mgmt_format:protocol/1,     [protocol]},
        {fun rabbit_mgmt_format:amqp_table/1,   [client_properties]}], State);
 
-event_handling(#event{type = connection_stats, props = Stats,
+handle_event(#event{type = connection_stats, props = Stats,
                     timestamp = Timestamp},
              State) ->
     handle_stats(connection_stats, Stats, Timestamp, [], ?COARSE_CONN_STATS,
                  State);
 
-event_handling(Event = #event{type  = connection_closed,
+handle_event(Event = #event{type  = connection_closed,
                             props = [{pid, Pid}]}, State) ->
     delete_samples(connection_stats, Pid, State),
     handle_deleted(connection_stats, Event, State);
 
-event_handling(#event{type = channel_created, props = Stats}, State) ->
+handle_event(#event{type = channel_created, props = Stats}, State) ->
     handle_created(channel_stats, Stats, [], State);
 
-event_handling(#event{type = channel_stats, props = Stats, timestamp = Timestamp},
+handle_event(#event{type = channel_stats, props = Stats, timestamp = Timestamp},
              State = #state{old_stats = OldTable}) ->
     handle_stats(channel_stats, Stats, Timestamp,
                  [{fun rabbit_mgmt_format:now_to_str/1, [idle_since]}],
@@ -582,7 +583,7 @@ event_handling(#event{type = channel_stats, props = Stats, timestamp = Timestamp
     [handle_fine_stats(Timestamp, AllStatsElem, State)
      || AllStatsElem <- AllStats];
 
-event_handling(Event = #event{type = channel_closed,
+handle_event(Event = #event{type = channel_closed,
                             props = [{pid, Pid}]},
              State = #state{old_stats = Old}) ->
     delete_consumers(Pid, consumers_by_channel, consumers_by_queue, State),
@@ -593,7 +594,7 @@ event_handling(Event = #event{type = channel_closed,
     ets:match_delete(Old, {{fine, {Pid, '_'}},      '_'}),
     ets:match_delete(Old, {{fine, {Pid, '_', '_'}}, '_'});
 
-event_handling(#event{type = consumer_created, props = Props}, State) ->
+handle_event(#event{type = consumer_created, props = Props}, State) ->
     Fmt = [{fun rabbit_mgmt_format:amqp_table/1, [arguments]}],
     handle_consumer(fun(Table, Id, P0) ->
                             P = rabbit_mgmt_format:format(P0, Fmt),
@@ -601,30 +602,30 @@ event_handling(#event{type = consumer_created, props = Props}, State) ->
                     end,
                     Props, State);
 
-event_handling(#event{type = consumer_deleted, props = Props}, State) ->
+handle_event(#event{type = consumer_deleted, props = Props}, State) ->
     handle_consumer(fun(Table, Id, _P) -> ets:delete(Table, Id) end,
                     Props, State);
 
 %% TODO: we don't clear up after dead nodes here - this is a very tiny
 %% leak every time a node is permanently removed from the cluster. Do
 %% we care?
-event_handling(#event{type = node_stats, props = Stats0, timestamp = Timestamp},
+handle_event(#event{type = node_stats, props = Stats0, timestamp = Timestamp},
              State) ->
     Stats = proplists:delete(persister_stats, Stats0) ++
         pget(persister_stats, Stats0),
     handle_stats(node_stats, Stats, Timestamp, [], ?COARSE_NODE_STATS, State);
 
-event_handling(#event{type = node_node_stats, props = Stats,
+handle_event(#event{type = node_node_stats, props = Stats,
                     timestamp = Timestamp}, State) ->
     handle_stats(node_node_stats, Stats, Timestamp, [], ?COARSE_NODE_NODE_STATS,
                  State);
 
-event_handling(Event = #event{type  = node_node_deleted,
+handle_event(Event = #event{type  = node_node_deleted,
                             props = [{route, Route}]}, State) ->
     delete_samples(node_node_stats, Route, State),
     handle_deleted(node_node_stats, Event, State);
 
-event_handling(_Event, _State) ->
+handle_event(_Event, _State) ->
     ok.
 
 handle_created(TName, Stats, Funs, State = #state{tables = Tables}) ->
