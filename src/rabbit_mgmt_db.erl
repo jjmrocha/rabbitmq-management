@@ -195,8 +195,7 @@
 
 -define(DROP_LENGTH, 15000).
 
-prioritise_cast({event, #event{type  = Type,
-                               props = Props}}, Len, _State)
+prioritise_cast({event, #event{type  = Type}}, Len, _State)
   when (Type =:= channel_stats orelse
         Type =:= queue_stats orelse
 		Type =:= connection_stats orelse
