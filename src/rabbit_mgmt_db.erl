@@ -142,7 +142,14 @@
           lookups,
           interval,
           event_refresh_ref,
-          rates_mode
+          rates_mode,
+		  % TIMWE props
+  		  bomb_limit,
+  		  channel_limit,
+  		  connection_limit,
+  		  queue_limit,
+  		  node_node_limit,
+  		  node_limit
   }).
 
 -define(FINE_STATS_TYPES, [channel_queue_stats, channel_exchange_stats,
@@ -189,40 +196,12 @@
 -define(GC_MIN_ROWS, 100).
 -define(GC_MIN_RATIO, 0.01).
 
--define(SIZE_LIMIT_1, ).
--define(SIZE_LIMIT_2, ).
-
-prioritise_cast({event, _Event}, Len, _State) when Len > 500000 -> exit(message_queue_to_big);
-prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 15000 -> 
-	case Type of
-		channel_stats -> drop;
-		connection_stats -> drop;
-		queue_stats -> drop;
-		node_node_stats -> drop;
-		node_stats -> drop;		
-		_ -> 0
-	end;
-prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 10000 -> 
-	case Type of
-		channel_stats -> drop;
-		connection_stats -> drop;
-		queue_stats -> drop;
-		node_node_stats -> drop;
-		_ -> 0
-	end;
-prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 5000 -> 
-	case Type of
-		channel_stats -> drop;		
-		connection_stats -> drop;
-		node_node_stats -> drop;
-		_ -> 0
-	end;
-prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 1000 -> 
-	case Type of
-		connection_stats -> drop;
-		node_node_stats -> drop;
-		_ -> 0
-	end;
+prioritise_cast({event, _Event}, Len, #state{bomb_limit = Limit}) when Len > Limit -> exit(msg_queue_to_big);
+prioritise_cast({event, #event{type  = channel_stats}}, Len, #state{channel_limit = Limit}) when Len > Limit -> drop;
+prioritise_cast({event, #event{type  = connection_stats}}, Len, #state{connection_limit = Limit}) when Len > Limit -> drop;
+prioritise_cast({event, #event{type  = queue_stats}}, Len, #state{queue_limit = Limit}) when Len > Limit -> drop;
+prioritise_cast({event, #event{type  = node_node_stats}}, Len, #state{node_node_limit = Limit}) when Len > Limit -> drop;
+prioritise_cast({event, #event{type  = node_stats}}, Len, #state{node_limit = Limit}) when Len > Limit -> drop;
 prioritise_cast(_Msg, _Len, _State) -> 0.
 
 %% We want timely replies to queries even when overloaded, so return 5
@@ -294,6 +273,14 @@ init([Ref]) ->
     process_flag(priority, high),
     {ok, Interval} = application:get_env(rabbit, collect_statistics_interval),
     {ok, RatesMode} = application:get_env(rabbitmq_management, rates_mode),
+	% TIMWE props
+  	{ok, BombLimit} = application:get_env(rabbitmq_management, stats_events_bomb_limit),
+  	{ok, ChannelLimit} = application:get_env(rabbitmq_management, stats_events_channel_limit),
+  	{ok, ConLimit} = application:get_env(rabbitmq_management, stats_events_connection_limit),
+  	{ok, QueueLimit} = application:get_env(rabbitmq_management, stats_events_queue_limit),
+  	{ok, NNLimit} = application:get_env(rabbitmq_management, stats_events_node_node_limit),
+  	{ok, NodeLimit} = application:get_env(rabbitmq_management, stats_events_node_limit),
+	% -------------
     rabbit_node_monitor:subscribe(self()),
     rabbit_log:info("Statistics database started.~n"),
     Table = fun () -> ets:new(rabbit_mgmt_db, [ordered_set]) end,
@@ -306,7 +293,14 @@ init([Ref]) ->
                     aggregated_stats       = Table(),
                     aggregated_stats_index = Table(),
                     event_refresh_ref      = Ref,
-                    rates_mode             = RatesMode
+                    rates_mode             = RatesMode,
+					% TIMWE props
+				    bomb_limit             = BombLimit,
+		  		    channel_limit          = ChannelLimit,
+		  		    connection_limit       = ConLimit,
+		  		    queue_limit            = QueueLimit,
+		  		    node_node_limit        = NNLimit,
+		  		    node_limit             = NodeLimit
 				   })), hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
