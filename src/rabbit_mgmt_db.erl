@@ -189,19 +189,33 @@
 -define(GC_MIN_ROWS, 100).
 -define(GC_MIN_RATIO, 0.01).
 
--define(DROP_LENGTH, 15000).
--define(DROP_BOMB_LENGTH, 500000).
+-define(SIZE_LIMIT_1, ).
+-define(SIZE_LIMIT_2, ).
 
-prioritise_cast({event, _Event}, Len, _State) when Len > ?DROP_BOMB_LENGTH -> exit(message_queue_to_big);
-prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > ?DROP_LENGTH -> if_stats(Type, drop, 0);
+prioritise_cast({event, _Event}, Len, _State) when Len > 500000 -> exit(message_queue_to_big);
+prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 15000 -> 
+	case Type of
+		channel_stats -> drop;
+		connection_stats -> drop;
+		queue_stats -> drop;
+		node_node_stats -> drop;
+		node_stats -> drop;
+		_ -> 0
+	end;
+prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 5000 -> 
+	case Type of
+		connection_stats -> drop;
+		queue_stats -> drop;
+		node_node_stats -> drop;
+		_ -> 0
+	end;
+prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 1000 -> 
+	case Type of
+		connection_stats -> drop;
+		node_node_stats -> drop;
+		_ -> 0
+	end;
 prioritise_cast(_Msg, _Len, _State) -> 0.
-
-if_stats(channel_stats, IfTrue, _) -> IfTrue;
-if_stats(connection_stats, IfTrue, _) -> IfTrue;
-if_stats(queue_stats, IfTrue, _) -> IfTrue;
-if_stats(node_stats, IfTrue, _) -> IfTrue;
-if_stats(node_node_stats, IfTrue, _) -> IfTrue;
-if_stats(_, _, IfFalse) -> IfFalse.
 
 %% We want timely replies to queries even when overloaded, so return 5
 %% as priority. Also we only have access to the queue length here, not
