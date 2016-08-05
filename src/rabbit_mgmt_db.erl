@@ -199,13 +199,21 @@ prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 15000 ->
 		connection_stats -> drop;
 		queue_stats -> drop;
 		node_node_stats -> drop;
-		node_stats -> drop;
+		node_stats -> drop;		
+		_ -> 0
+	end;
+prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 10000 -> 
+	case Type of
+		channel_stats -> drop;
+		connection_stats -> drop;
+		queue_stats -> drop;
+		node_node_stats -> drop;
 		_ -> 0
 	end;
 prioritise_cast({event, #event{type  = Type}}, Len, _State) when Len > 5000 -> 
 	case Type of
+		channel_stats -> drop;		
 		connection_stats -> drop;
-		queue_stats -> drop;
 		node_node_stats -> drop;
 		_ -> 0
 	end;
